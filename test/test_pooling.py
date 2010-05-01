@@ -245,13 +245,11 @@ class TestPooling(unittest.TestCase):
         a_sock = c._Connection__pool.sockets[0]
 
         def loop(name, pipe):
-            print 'begin', name
             c.test.test.find_one()
             self.assertEqual(0, len(c._Connection__pool.sockets))
             greenlet.getcurrent().parent.switch()
             c.end_request()
             pipe.append(c._Connection__pool.sockets[-1])
-            print 'end', name
 
         ga1 = []
         ga2 = []
