@@ -40,7 +40,7 @@ import random
 import socket
 import struct
 import sys
-import threading
+import thread
 import warnings
 
 from pymongo import (bson,
@@ -59,43 +59,47 @@ from pymongo.son import SON
 _CONNECT_TIMEOUT = 20.0
 
 
-class Pool(threading.local):
+def get_ident():
+    return os.getpid(), thread.get_ident()
+
+try:
+    from greenlet import greenlet
+except ImportError:
+    pass
+else:
+    def get_ident():
+        return os.getpid(), thread.get_ident(), greenlet.getcurrent()
+
+
+class Pool(object):
     """A simple connection pool.
 
     Uses thread-local socket per thread. By calling return_socket() a thread
     can return a socket to the pool.
     """
 
-    # Non thread-locals
-    __slots__ = ["sockets", "socket_factory"]
-    sock = None
-
     def __init__(self, socket_factory):
         self.socket_factory = socket_factory
-        if not hasattr(self, "sockets"):
-            self.sockets = []
+        self.sockets = []
+        self.active_sockets = {}
 
     def socket(self):
-        # we store the pid here to avoid issues with fork /
-        # multiprocessing - see
-        # test.test_connection:TestConnection.test_fork for an example
-        # of what could go wrong otherwise
-        pid = os.getpid()
-
-        if self.sock is not None and self.sock[0] == pid:
-            return self.sock[1]
+        sock_id = get_ident()
 
         try:
-            self.sock = (pid, self.sockets.pop())
-        except IndexError:
-            self.sock = (pid, self.socket_factory())
-
-        return self.sock[1]
+            sock = self.active_sockets[sock_id]
+        except KeyError:
+            try:
+                sock = self.sockets.pop()
+            except IndexError:
+                sock = self.socket_factory()
+            self.active_sockets[sock_id] = sock
+        return sock
 
     def return_socket(self):
-        if self.sock is not None and self.sock[0] == os.getpid():
-            self.sockets.append(self.sock[1])
-        self.sock = None
+        sock = self.active_sockets.pop(get_ident(), None)
+        if sock is not None:
+            self.sockets.append(sock)
 
 
 class Connection(object): # TODO support auth for pooling

@@ -232,6 +232,44 @@ class TestPooling(unittest.TestCase):
         self.assert_(b_sock != c_sock)
         self.assertEqual(a_sock, a._Connection__pool.socket())
 
+    def test_pool_with_greenlets(self):
+        try:
+            from greenlet import greenlet
+        except ImportError:
+            raise SkipTest()
+
+        c = get_connection()
+        c.test.test.find_one()
+        c.end_request()
+        self.assertEqual(1, len(c._Connection__pool.sockets))
+        a_sock = c._Connection__pool.sockets[0]
+
+        def loop(name, pipe):
+            print 'begin', name
+            c.test.test.find_one()
+            self.assertEqual(0, len(c._Connection__pool.sockets))
+            greenlet.getcurrent().parent.switch()
+            c.end_request()
+            pipe.append(c._Connection__pool.sockets[-1])
+            print 'end', name
+
+        ga1 = []
+        ga2 = []
+
+        g1 = greenlet(loop)
+        g2 = greenlet(loop)
+
+        g1.switch('g1', ga1)
+        g2.switch('g2', ga2)
+        g1.switch()
+        g2.switch()
+
+        b_sock = ga1[0]
+        c_sock = ga2[0]
+        self.assert_(a_sock is b_sock)
+        self.assert_(a_sock is not c_sock)
+        self.assert_(b_sock is not c_sock)
+
 
 if __name__ == "__main__":
     unittest.main()
